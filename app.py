@@ -60,6 +60,8 @@ app.layout = html.Div(
         "margin": "0",
     },
     children=[
+        dcc.Store(id="accounts-original-data"),
+        dcc.Store(id="balances-original-data"),
         # ── Header ──
         html.Div(
             style={
@@ -311,15 +313,20 @@ app.layout = html.Div(
                             children=[
                                 html.H3("Your Accounts", style={"marginTop": "0", "marginBottom": "0", "color": "#e94560", "fontWeight": "400"}),
                                 html.Div(children=[
+                                    html.Button("Undo Changes", id="undo-accounts-btn", n_clicks=0, style={
+                                        "backgroundColor": "#ffd32a", "color": "#0f1117", "border": "none",
+                                        "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
+                                        "fontSize": "0.85rem", "marginRight": "10px", "display": "none",
+                                    }),
                                     html.Button("Save Changes", id="save-accounts-btn", n_clicks=0, style={
                                         "backgroundColor": "#53d769", "color": "white", "border": "none",
                                         "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
-                                        "fontSize": "0.85rem", "marginRight": "10px",
+                                        "fontSize": "0.85rem", "marginRight": "10px", "display": "none",
                                     }),
                                     html.Button("Delete Selected", id="delete-accounts-btn", n_clicks=0, style={
                                         "backgroundColor": "#ff6b6b", "color": "white", "border": "none",
                                         "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
-                                        "fontSize": "0.85rem",
+                                        "fontSize": "0.85rem", "display": "none",
                                     }),
                                 ]),
                             ],
@@ -342,15 +349,20 @@ app.layout = html.Div(
                             children=[
                                 html.H3("Balance History", style={"marginTop": "0", "marginBottom": "0", "color": "#e94560", "fontWeight": "400"}),
                                 html.Div(children=[
+                                    html.Button("Undo Changes", id="undo-balances-btn", n_clicks=0, style={
+                                        "backgroundColor": "#ffd32a", "color": "#0f1117", "border": "none",
+                                        "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
+                                        "fontSize": "0.85rem", "marginRight": "10px", "display": "none",
+                                    }),
                                     html.Button("Save Changes", id="save-balances-btn", n_clicks=0, style={
                                         "backgroundColor": "#53d769", "color": "white", "border": "none",
                                         "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
-                                        "fontSize": "0.85rem", "marginRight": "10px",
+                                        "fontSize": "0.85rem", "marginRight": "10px", "display": "none",
                                     }),
                                     html.Button("Delete Selected", id="delete-balances-btn", n_clicks=0, style={
                                         "backgroundColor": "#ff6b6b", "color": "white", "border": "none",
                                         "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
-                                        "fontSize": "0.85rem",
+                                        "fontSize": "0.85rem", "display": "none",
                                     }),
                                 ]),
                             ],
@@ -436,6 +448,8 @@ def add_balance(n, account_id, bal_date, amount):
     Output("allocation-chart", "figure"),
     Output("accounts-table", "children"),
     Output("balances-table", "children"),
+    Output("accounts-original-data", "data"),
+    Output("balances-original-data", "data"),
     Input("account-msg", "children"),
     Input("balance-msg", "children"),
     Input("accounts-edit-msg", "children"),
@@ -579,16 +593,20 @@ def refresh_dashboard(*_):
             ],
             css=[
                 {"selector": ".dash-cell.focused", "rule": "color: #ffffff !important; cursor: text !important;"},
-                {"selector": "input.dash-cell-value", "rule": "color: #ffffff !important; caret-color: #0fbcf9 !important; background-color: #0f1117 !important; cursor: text !important; font-size: 14px !important;"},
+                {"selector": "input.dash-cell-value", "rule": "color: #ffffff !important; caret-color: #0fbcf9 !important; background-color: #0f1117 !important; cursor: text !important; font-size: 14px !important; min-width: 40px !important;"},
+                {"selector": ".Select-value-label", "rule": "color: #e0e0e0 !important;"},
+                {"selector": "tr:not(.row-selected):hover td.dash-cell", "rule": "background-color: inherit;"},
             ],
         )
 
     # ── Balances Table ──
     if balances.empty:
         bal_table = html.P("No balances logged yet.", style={"color": "#8892b0"})
+        bal_store_data = []
     else:
         bal_display = balances[["id", "account", "type", "date", "amount"]].copy()
         bal_display["date"] = bal_display["date"].dt.strftime("%Y-%m-%d")
+        bal_store_data = bal_display.to_dict("records")
         bal_table = dash_table.DataTable(
             id="balances-datatable",
             data=bal_display.to_dict("records"),
@@ -620,12 +638,14 @@ def refresh_dashboard(*_):
             ],
             css=[
                 {"selector": ".dash-cell.focused", "rule": "color: #ffffff !important; cursor: text !important;"},
-                {"selector": "input.dash-cell-value", "rule": "color: #ffffff !important; caret-color: #0fbcf9 !important; background-color: #0f1117 !important; cursor: text !important; font-size: 14px !important;"},
+                {"selector": "input.dash-cell-value", "rule": "color: #ffffff !important; caret-color: #0fbcf9 !important; background-color: #0f1117 !important; cursor: text !important; font-size: 14px !important; min-width: 40px !important;"},
+                {"selector": "tr:not(.row-selected):hover td.dash-cell", "rule": "background-color: inherit;"},
             ],
             page_size=10,
         )
 
-    return account_options, cards, nw_fig, alloc_fig, acc_table, bal_table
+    acc_store_data = accounts.to_dict("records") if not accounts.empty else []
+    return account_options, cards, nw_fig, alloc_fig, acc_table, bal_table, acc_store_data, bal_store_data
 
 
 # ── Callback: Save Account Edits ────────────────────────────────────────────
@@ -745,6 +765,120 @@ def delete_balances(n_clicks, table_children):
         return html.Span(f"Deleted {deleted} balance(s).", style={"color": "#53d769"})
     except Exception as e:
         return html.Span(f"Error: {e}", style={"color": "#ff6b6b"})
+
+
+# ── Shared button styles ─────────────────────────────────────────────────────
+
+_UNDO_BTN_VISIBLE = {
+    "backgroundColor": "#ffd32a", "color": "#0f1117", "border": "none",
+    "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
+    "fontSize": "0.85rem", "marginRight": "10px", "display": "inline-block",
+}
+_UNDO_BTN_HIDDEN = {**_UNDO_BTN_VISIBLE, "display": "none"}
+
+_SAVE_BTN_VISIBLE = {
+    "backgroundColor": "#53d769", "color": "white", "border": "none",
+    "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
+    "fontSize": "0.85rem", "marginRight": "10px", "display": "inline-block",
+}
+_SAVE_BTN_HIDDEN = {**_SAVE_BTN_VISIBLE, "display": "none"}
+
+_DELETE_BTN_VISIBLE = {
+    "backgroundColor": "#ff6b6b", "color": "white", "border": "none",
+    "padding": "8px 18px", "borderRadius": "6px", "cursor": "pointer",
+    "fontSize": "0.85rem", "display": "inline-block",
+}
+_DELETE_BTN_HIDDEN = {**_DELETE_BTN_VISIBLE, "display": "none"}
+
+
+def _has_data_changes(data, original_data):
+    """Compare rows ignoring display order so native sorting never counts as a change."""
+    if original_data is None or data is None:
+        return False
+    if len(data) != len(original_data):
+        return True
+    key = lambda r: r.get("id", 0)
+    return sorted(data, key=key) != sorted(original_data, key=key)
+
+
+# ── Callback: Toggle Accounts edit buttons (Undo + Save) ─────────────────────
+
+@callback(
+    Output("undo-accounts-btn", "style"),
+    Output("save-accounts-btn", "style"),
+    Input("accounts-datatable", "data"),
+    State("accounts-original-data", "data"),
+    prevent_initial_call=True,
+)
+def toggle_accounts_edit_btns(data, original_data):
+    has_changes = _has_data_changes(data, original_data)
+    return (
+        _UNDO_BTN_VISIBLE if has_changes else _UNDO_BTN_HIDDEN,
+        _SAVE_BTN_VISIBLE if has_changes else _SAVE_BTN_HIDDEN,
+    )
+
+
+# ── Callback: Toggle Accounts Delete button ──────────────────────────────────
+
+@callback(
+    Output("delete-accounts-btn", "style"),
+    Input("accounts-datatable", "selected_rows"),
+    prevent_initial_call=True,
+)
+def toggle_delete_accounts(selected_rows):
+    return _DELETE_BTN_VISIBLE if selected_rows else _DELETE_BTN_HIDDEN
+
+
+# ── Callback: Undo Account Edits ─────────────────────────────────────────────
+# Triggers refresh_dashboard (re-reads DB) instead of writing to datatable.data
+# directly — avoids conflicting with sort_action="native" which also owns that prop.
+
+@callback(
+    Output("accounts-edit-msg", "children", allow_duplicate=True),
+    Input("undo-accounts-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def undo_account_edits(_):
+    return html.Span("Changes undone.", style={"color": "#ffd32a"})
+
+
+# ── Callback: Toggle Balances edit buttons (Undo + Save) ─────────────────────
+
+@callback(
+    Output("undo-balances-btn", "style"),
+    Output("save-balances-btn", "style"),
+    Input("balances-datatable", "data"),
+    State("balances-original-data", "data"),
+    prevent_initial_call=True,
+)
+def toggle_balances_edit_btns(data, original_data):
+    has_changes = _has_data_changes(data, original_data)
+    return (
+        _UNDO_BTN_VISIBLE if has_changes else _UNDO_BTN_HIDDEN,
+        _SAVE_BTN_VISIBLE if has_changes else _SAVE_BTN_HIDDEN,
+    )
+
+
+# ── Callback: Toggle Balances Delete button ──────────────────────────────────
+
+@callback(
+    Output("delete-balances-btn", "style"),
+    Input("balances-datatable", "selected_rows"),
+    prevent_initial_call=True,
+)
+def toggle_delete_balances(selected_rows):
+    return _DELETE_BTN_VISIBLE if selected_rows else _DELETE_BTN_HIDDEN
+
+
+# ── Callback: Undo Balance Edits ─────────────────────────────────────────────
+
+@callback(
+    Output("balances-edit-msg", "children", allow_duplicate=True),
+    Input("undo-balances-btn", "n_clicks"),
+    prevent_initial_call=True,
+)
+def undo_balance_edits(_):
+    return html.Span("Changes undone.", style={"color": "#ffd32a"})
 
 
 # ── Run ─────────────────────────────────────────────────────────────────────
