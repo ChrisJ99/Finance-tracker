@@ -1,24 +1,30 @@
 import dash
-from dash import html, dcc, dash_table, Input, Output, State, callback, no_update
+from dash import html, dcc, dash_table, Input, Output, State, callback, no_update, ctx
 import plotly.express as px
 import plotly.graph_objects as go
 import sqlite3
 import pandas as pd
 from datetime import datetime, date
+import glob
+import re
+import os
 
 # ── Database Setup ──────────────────────────────────────────────────────────
 
-DB_PATH = "finance.db"
+##Chris J
+##DB_PATH = "finance.db"
+##Maya
+DB_PATH = "maya-finance.db"
 
 
-def get_db():
-    conn = sqlite3.connect(DB_PATH)
+def get_db(path=None):
+    conn = sqlite3.connect(path or DB_PATH)
     conn.execute("PRAGMA foreign_keys = ON")
     return conn
 
 
-def init_db():
-    conn = get_db()
+def init_db(path=None):
+    conn = get_db(path)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS accounts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -45,6 +51,11 @@ def init_db():
     conn.close()
 
 
+def list_databases():
+    """Return sorted list of .db files in the working directory."""
+    return sorted(glob.glob("*.db"))
+
+
 init_db()
 
 # ── Account Types ───────────────────────────────────────────────────────────
@@ -67,6 +78,7 @@ app.layout = html.Div(
     children=[
         dcc.Store(id="accounts-original-data"),
         dcc.Store(id="balances-original-data"),
+        dcc.Store(id="db-path-store", data=DB_PATH),
         # ── Header ──
         html.Div(
             style={
@@ -93,6 +105,60 @@ app.layout = html.Div(
                         "fontSize": "0.95rem",
                     },
                 ),
+            ],
+        ),
+        # ── DB Selector Bar ──
+        html.Div(
+            style={
+                "background": "#12122a",
+                "padding": "10px 40px",
+                "borderBottom": "1px solid #2a2a4a",
+                "display": "flex",
+                "alignItems": "center",
+                "gap": "12px",
+                "flexWrap": "wrap",
+            },
+            children=[
+                html.Span("Database:", style={"color": "#8892b0", "fontSize": "0.85rem", "whiteSpace": "nowrap"}),
+                dcc.Dropdown(
+                    id="db-selector-dropdown",
+                    value=DB_PATH,
+                    clearable=False,
+                    className="dark-dropdown",
+                    style={"minWidth": "200px", "flex": "0 1 220px", "fontSize": "0.85rem"},
+                ),
+                html.Div(style={"width": "1px", "height": "20px", "backgroundColor": "#2a2a4a"}),
+                html.Span("New DB:", style={"color": "#8892b0", "fontSize": "0.85rem", "whiteSpace": "nowrap"}),
+                dcc.Input(
+                    id="new-db-name",
+                    type="text",
+                    placeholder="e.g. john-finance",
+                    style={
+                        "flex": "0 1 180px",
+                        "padding": "6px 10px",
+                        "backgroundColor": "#0f1117",
+                        "border": "1px solid #2a2a4a",
+                        "borderRadius": "6px",
+                        "color": "#e0e0e0",
+                        "fontSize": "0.85rem",
+                    },
+                ),
+                html.Button(
+                    "Create & Switch",
+                    id="create-db-btn",
+                    n_clicks=0,
+                    style={
+                        "backgroundColor": "#0fbcf9",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "7px 15px",
+                        "borderRadius": "6px",
+                        "cursor": "pointer",
+                        "fontSize": "0.85rem",
+                        "whiteSpace": "nowrap",
+                    },
+                ),
+                html.Span(id="db-switch-msg", style={"fontSize": "0.85rem"}),
             ],
         ),
         # ── Main Content ──
@@ -536,9 +602,10 @@ def _format_delta_pct(delta, pct):
     State("account-type", "value"),
     State("account-institution", "value"),
     State("account-interest-rate", "value"),
+    State("db-path-store", "data"),
     prevent_initial_call=True,
 )
-def add_account(n, name, acc_type, institution, interest_rate):
+def add_account(n, name, acc_type, institution, interest_rate, db_path):
     if not name or not acc_type:
         return (
             html.Span("Please fill in name and type.", style={"color": "#ff6b6b"}),
@@ -548,7 +615,7 @@ def add_account(n, name, acc_type, institution, interest_rate):
             dash.no_update,
         )
     rate = 0 if interest_rate is None else float(interest_rate)
-    conn = get_db()
+    conn = get_db(db_path)
     conn.execute(
         "INSERT INTO accounts (name, type, institution, interest_rate) VALUES (?, ?, ?, ?)",
         (name, acc_type, institution or "", rate),
@@ -567,12 +634,13 @@ def add_account(n, name, acc_type, institution, interest_rate):
     State("balance-account", "value"),
     State("balance-date", "date"),
     State("balance-amount", "value"),
+    State("db-path-store", "data"),
     prevent_initial_call=True,
 )
-def add_balance(n, account_id, bal_date, amount):
+def add_balance(n, account_id, bal_date, amount, db_path):
     if not account_id or not bal_date or amount is None:
         return html.Span("Please fill in all fields.", style={"color": "#ff6b6b"}), dash.no_update
-    conn = get_db()
+    conn = get_db(db_path)
     conn.execute("INSERT INTO balances (account_id, date, amount) VALUES (?, ?, ?)", (account_id, bal_date, amount))
     conn.commit()
     conn.close()
@@ -599,9 +667,12 @@ def add_balance(n, account_id, bal_date, amount):
     Input("balance-msg", "children"),
     Input("accounts-edit-msg", "children"),
     Input("balances-edit-msg", "children"),
+    Input("db-path-store", "data"),
 )
-def refresh_dashboard(*_):
-    conn = get_db()
+def refresh_dashboard(*args):
+    db_path = args[-1]
+    init_db(db_path)
+    conn = get_db(db_path)
 
     # ── Accounts dropdown ──
     accounts = pd.read_sql("SELECT * FROM accounts", conn)
@@ -1051,16 +1122,17 @@ def refresh_dashboard(*_):
     Output("accounts-edit-msg", "children"),
     Input("save-accounts-btn", "n_clicks"),
     State("accounts-table", "children"),
+    State("db-path-store", "data"),
     prevent_initial_call=True,
 )
-def save_account_edits(n_clicks, table_children):
+def save_account_edits(n_clicks, table_children, db_path):
     if not table_children or not isinstance(table_children, dict):
         return html.Span("No data to save.", style={"color": "#ff6b6b"})
     try:
         data = table_children.get("props", {}).get("data", [])
         if not data:
             return html.Span("No data to save.", style={"color": "#ff6b6b"})
-        conn = get_db()
+        conn = get_db(db_path)
         for row in data:
             conn.execute(
                 "UPDATE accounts SET name=?, type=?, institution=?, interest_rate=? WHERE id=?",
@@ -1085,9 +1157,10 @@ def save_account_edits(n_clicks, table_children):
     Output("accounts-edit-msg", "children", allow_duplicate=True),
     Input("delete-accounts-btn", "n_clicks"),
     State("accounts-table", "children"),
+    State("db-path-store", "data"),
     prevent_initial_call=True,
 )
-def delete_accounts(n_clicks, table_children):
+def delete_accounts(n_clicks, table_children, db_path):
     if not table_children or not isinstance(table_children, dict):
         return html.Span("No data.", style={"color": "#ff6b6b"})
     try:
@@ -1096,7 +1169,7 @@ def delete_accounts(n_clicks, table_children):
         selected = props.get("selected_rows", [])
         if not selected:
             return html.Span("Select rows to delete first (click the checkboxes).", style={"color": "#ffd32a"})
-        conn = get_db()
+        conn = get_db(db_path)
         deleted = 0
         for idx in selected:
             if idx < len(data):
@@ -1117,16 +1190,17 @@ def delete_accounts(n_clicks, table_children):
     Output("balances-edit-msg", "children"),
     Input("save-balances-btn", "n_clicks"),
     State("balances-table", "children"),
+    State("db-path-store", "data"),
     prevent_initial_call=True,
 )
-def save_balance_edits(n_clicks, table_children):
+def save_balance_edits(n_clicks, table_children, db_path):
     if not table_children or not isinstance(table_children, dict):
         return html.Span("No data to save.", style={"color": "#ff6b6b"})
     try:
         data = table_children.get("props", {}).get("data", [])
         if not data:
             return html.Span("No data to save.", style={"color": "#ff6b6b"})
-        conn = get_db()
+        conn = get_db(db_path)
         for row in data:
             conn.execute(
                 "UPDATE balances SET date=?, amount=? WHERE id=?",
@@ -1145,9 +1219,10 @@ def save_balance_edits(n_clicks, table_children):
     Output("balances-edit-msg", "children", allow_duplicate=True),
     Input("delete-balances-btn", "n_clicks"),
     State("balances-table", "children"),
+    State("db-path-store", "data"),
     prevent_initial_call=True,
 )
-def delete_balances(n_clicks, table_children):
+def delete_balances(n_clicks, table_children, db_path):
     if not table_children or not isinstance(table_children, dict):
         return html.Span("No data.", style={"color": "#ff6b6b"})
     try:
@@ -1156,7 +1231,7 @@ def delete_balances(n_clicks, table_children):
         selected = props.get("selected_rows", [])
         if not selected:
             return html.Span("Select rows to delete first (click the checkboxes).", style={"color": "#ffd32a"})
-        conn = get_db()
+        conn = get_db(db_path)
         deleted = 0
         for idx in selected:
             if idx < len(data):
@@ -1282,6 +1357,59 @@ def toggle_delete_balances(selected_rows):
 )
 def undo_balance_edits(_):
     return html.Span("Changes undone.", style={"color": "#ffd32a"})
+
+
+# ── Callback: Populate DB selector dropdown ───────────────────────────────────
+
+@callback(
+    Output("db-selector-dropdown", "options"),
+    Input("db-path-store", "data"),
+)
+def update_db_list(current_path):
+    dbs = list_databases()
+    # Ensure the current DB appears even if it was just created
+    if current_path and current_path not in dbs:
+        dbs = sorted([current_path] + dbs)
+    return [{"label": f, "value": f} for f in dbs]
+
+
+# ── Callback: Switch to an existing DB ───────────────────────────────────────
+
+@callback(
+    Output("db-path-store", "data"),
+    Output("db-switch-msg", "children"),
+    Input("db-selector-dropdown", "value"),
+    State("db-path-store", "data"),
+    prevent_initial_call=True,
+)
+def switch_db(selected, current_path):
+    if not selected or selected == current_path:
+        return dash.no_update, dash.no_update
+    init_db(selected)
+    return selected, html.Span(f"Switched to {selected}", style={"color": "#53d769"})
+
+
+# ── Callback: Create a new DB and switch to it ────────────────────────────────
+
+@callback(
+    Output("db-path-store", "data", allow_duplicate=True),
+    Output("db-switch-msg", "children", allow_duplicate=True),
+    Output("new-db-name", "value"),
+    Output("db-selector-dropdown", "value"),
+    Input("create-db-btn", "n_clicks"),
+    State("new-db-name", "value"),
+    prevent_initial_call=True,
+)
+def create_db(_, new_name):
+    if not new_name or not new_name.strip():
+        return dash.no_update, html.Span("Enter a name for the new database.", style={"color": "#ff6b6b"}), dash.no_update, dash.no_update
+    name = new_name.strip()
+    if not name.endswith(".db"):
+        name = name + ".db"
+    # Sanitise: allow word chars, hyphens, dots only
+    name = re.sub(r"[^\w\-.]", "-", name)
+    init_db(name)
+    return name, html.Span(f"Created & switched to {name}", style={"color": "#53d769"}), "", name
 
 
 # ── Run ─────────────────────────────────────────────────────────────────────
