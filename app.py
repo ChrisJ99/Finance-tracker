@@ -12,9 +12,9 @@ import os
 # ── Database Setup ──────────────────────────────────────────────────────────
 
 ##Chris J
-##DB_PATH = "finance.db"
+DB_PATH = "finance.db"
 ##Maya
-DB_PATH = "maya-finance.db"
+##DB_PATH = "maya-finance.db"
 
 
 def get_db(path=None):
